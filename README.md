@@ -16,3 +16,8 @@ A lightweight chat interface for the Gemini 1.5 language model, running on an M5
 - add the nessesary libraries to the lib folder, or copy the whole bundle to a lib folder on your sd card
 - insert your gemini api key in the settings.toml file
 
+### To-do
+
+- Find a way avoid emojis
+- Find the right way to insert the safety settings in json request (it is very sensitive)
+
