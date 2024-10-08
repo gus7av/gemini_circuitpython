@@ -12,9 +12,9 @@ A lightweight chat interface for the Gemini 1.5 language model, running on an M5
 
 ## Installation
 
-- copy code.py, fonts, lib (including helper libraries) to your cardputer
+- copy ´code.py´, ´fonts´, ´lib´ (including helper libraries) to your cardputer
 - add the nessesary libraries to the lib folder, or copy the whole bundle to a lib folder on your sd card
-- insert your gemini api key in the settings.toml file
+- insert your gemini api key in the ´settings.toml´ file
 
 ### To-do
 
