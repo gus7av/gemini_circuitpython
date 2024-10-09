@@ -15,12 +15,13 @@ from adafruit_bitmap_font import bitmap_font
 from adafruit_display_shapes.rect import Rect
 
 
-# Define the Google API key and URL
+# Define the Google API key and model
+model = "pro"
 api_key = os.getenv("GEMINI_API_KEY")
-url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+
 
 # Define instructions for the model
-instructions = "Keep the answer very short but informative. No markdown formatting or emojis please."
+instructions = "Keep the answer short but informative. No markdown formatting or emojis please."
 
 # Define the request headers
 headers = {"Content-Type": "application/json"}
@@ -107,7 +108,7 @@ def capture_user_input():
         text_width = custom_font.get_bounding_box()[0] * len(user_input_area.text)
 
         # Adjust anchored position to keep text within bounds
-        if text_width > display.width - 10:  # Adjust for padding
+        if text_width > display.width - (padding*2):  # Adjust for padding
             user_input_area.anchored_position = (
                 display.width - text_width - padding,
                 input_position,
@@ -119,7 +120,7 @@ def capture_user_input():
 
 # Update chat log with line wrapping and optional text color
 def update_chat_log(text, color=WHITE_TEXT):  # Default color is white
-    max_width = display.width - (padding * 2)  # Juster for at passe til skærmens bredde
+    max_width = display.width - (padding * 2)  # Adjust to fit screen width
     wrapped_text_lines = wrap_text(text, max_width)
 
     # Start pagination
@@ -127,41 +128,48 @@ def update_chat_log(text, color=WHITE_TEXT):  # Default color is white
     total_pages = (total_lines + log_lines - 1) // log_lines
     current_page = 0
 
-    # Opdater tekstfarven for chat_log
+    # Update the text color for chat_log
     chat_log.color = color
 
     # reset input field
     user_input_area.anchored_position = (padding, input_position)
 
     while current_page < total_pages:
-        # Beregn hvilke linjer der skal vises på denne side
+        # Calculate which lines to display on this page
         start_line = current_page * log_lines
         end_line = min(start_line + log_lines, total_lines)
 
-        # Vis de linjer, der passer på denne side
+        # Display the lines that fit on this page
         chat_log.text = "\n".join(wrapped_text_lines[start_line:end_line])
         display.refresh()
 
         if current_page < total_pages - 1:
-            # Skriv besked i inputfeltet om at bladre
+            # Write message in the input field to prompt scrolling
             user_input_area.text = "> Press any key to scroll..."
             display.refresh()
 
-            # Vent på tastetryk for at gå til næste side
-            sys.stdin.read(1)  # Vent på tastetryk
+            # Wait for keypress to go to the next page
+            sys.stdin.read(1)  # Wait for keypress
 
         current_page += 1
 
-    # Efter sidste side, ryd inputområdet så man kan skrive nyt
+    # After the last page, clear the input area so new text can be entered
     user_input_area.text = "> "
     display.refresh()
 
-
+# Helper function to show countdown with explanation
+def countdown_with_explanation(seconds, explanation, text_color=GREY_TEXT):
+    for i in range(seconds, 0, -1):
+        # Create combined message with explanation and countdown
+        countdown_message = f"{explanation} Retrying in {i} seconds..."
+        update_chat_log(countdown_message, text_color)
+        time.sleep(1)  # Wait for 1 second between each countdown update
 
 # Accumulate chat history
 chat_history = []
 
 def gemini_chat():
+    global model
     pool = socketpool.SocketPool(wifi.radio)
     requests = adafruit_requests.Session(pool, ssl.create_default_context())
     display.refresh()
@@ -173,44 +181,79 @@ def gemini_chat():
             continue
         update_chat_log("Waiting for response...", GREY_TEXT)
 
-        # Add user input to chat history
-        chat_history.append({"role": "user", "parts": [{"text": user_input}]})
+        # Prepare payload with system instruction and user input
+        temp_chat_history = chat_history.copy()  # Temporary history for sending, excluding user input for now
+        temp_chat_history.append({"role": "user", "parts": [{"text": user_input}]})
 
-        # Create request payload with system instruction and chat history
         data = {
             "system_instruction": {"parts": [{"text": instructions}]},
-            "contents": chat_history,
+            "contents": temp_chat_history,  # Send the user input in the request but not add to permanent history yet
             "generationConfig": {"maxOutputTokens": 200},
+            "safety_settings": [{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"}]
         }
 
-        # Convert to JSON format
         json_data = json.dumps(data)
-        print(json_data)
 
-        # Make the HTTP POST request
-        try:
-            response = requests.post(url, headers=headers, data=json_data)
-            if response.status_code == 200:
-                response_data = response.json()
-                candidates = response_data.get("candidates", [])
-                if candidates:
-                    model_response_text = candidates[0]["content"]["parts"][0]["text"]
-                    model_response_text = model_response_text.replace("\n", " ")
+        # Set maximum retries and initial retry counter
+        max_retries = 3
+        retry_count = 0
 
-                    # Add model response to chat history
-                    chat_history.append({"role": "model", "parts": [{"text": model_response_text}]})
+        while retry_count < max_retries:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-{model}:generateContent?key={api_key}"
+                response = requests.post(url, headers=headers, data=json_data)
 
-                    update_chat_log(model_response_text)
-            else:
-                update_chat_log(f"HTTP Error: {response.status_code}", GREY_TEXT)
-        except Exception as e:
-            update_chat_log(f"Error: {e}", GREY_TEXT)
+                if response.status_code == 200:
+                    # Success: process the response and break out of retry loop
+                    response_data = response.json()
+                    candidates = response_data.get("candidates", [])
+                    if candidates:
+                        model_response_text = candidates[0]["content"]["parts"][0]["text"]
+                        model_response_text = model_response_text.replace("\n", " ")
+
+                        # Add user input and model response to chat history
+                        chat_history.append({"role": "user", "parts": [{"text": user_input}]})
+                        chat_history.append({"role": "model", "parts": [{"text": model_response_text}]})
+
+                        update_chat_log(model_response_text)
+                    break  # Exit retry loop after successful response
+
+                elif response.status_code == 429:
+                    # Handle rate limiting
+                    if model == "pro":
+                        model = "flash"  # Switch model to 'flash'
+                        update_chat_log("Request limit exceeded. Retrying with flash model...", GREY_TEXT)
+                    else:
+                        # If already on 'flash', wait and retry
+                        countdown_with_explanation(60, "Request limit exceeded.", GREY_TEXT)
+                        retry_count += 1
+
+                elif response.status_code in [500, 503]:
+                    # Handle server errors with shorter wait
+                    countdown_with_explanation(5, "Service unavailable.", GREY_TEXT)
+                    retry_count += 1
+
+                else:
+                    # Handle other errors and stop retries
+                    update_chat_log(f"HTTP Error: {response.status_code}", GREY_TEXT)
+                    break
+
+            except Exception as e:
+                update_chat_log(f"Error: {e}", GREY_TEXT)
+                break  # Stop retries after an exception
+
+        # If retries are exhausted, log failure
+        if retry_count >= max_retries:
+            update_chat_log("Failed to get a response after 3 retries.", GREY_TEXT)
+
 
 # Main function
 def main():
     if connection:
         print("Starting Gemini chat function...")
-
         gemini_chat()
     else:
         print("Failed to connect to Wi-Fi. Exiting.")
