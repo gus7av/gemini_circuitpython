@@ -101,7 +101,7 @@ def add_network_to_config(ssid, password):
 # Function to scan available networks
 def scan_available_networks():
     update_chat_log("Scanning for available networks...", GREY_TEXT)
-    available_networks = [net.ssid for net in wifi.radio.start_scanning_networks()]
+    available_networks = [net.ssid for net in wifi.radio.start_scanning_networks(stop_channel=14)]
     wifi.radio.stop_scanning_networks()
     return available_networks
 
@@ -352,4 +352,3 @@ while True:
         new_message = True
         new_input = True
         handle_request_with_retry()
-
